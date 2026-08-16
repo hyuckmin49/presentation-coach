@@ -24,7 +24,7 @@ class WhisperTranscriber:
 
     def transcribe(self, audio_path: str):
         """
-        음성을 한국어 텍스트로 변환하고
+        한국어 중심의 발표 음성을 텍스트로 변환하고
         segment-level / word-level timestamp를 반환한다.
         """
 
