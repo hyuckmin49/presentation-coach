@@ -61,6 +61,31 @@ def extract_filler_events(transcription_result):
     return events
 
 
+def extract_repeated_weakener_events(language_result):
+    """한 문장 안에서 두 번째 이후에 등장한 '약간'을 찾는다."""
+
+    events = []
+    for sentence in language_result.get("sentences", []):
+        words = [
+            word
+            for chunk in sentence.get("chunks", [])
+            for word in chunk.get("words", [])
+        ]
+        weakener_words = [
+            word
+            for word in words
+            if word.get("word", "").strip(".,?! ") == "약간"
+        ]
+        for word in weakener_words[1:]:
+            events.append({
+                "start": word["start"],
+                "end": word["end"],
+                "text": word["word"],
+                "sentence_id": sentence["sentence_id"],
+            })
+    return events
+
+
 # ------------------------------------------------------------
 # C → 모든 chunk 평탄화
 # ------------------------------------------------------------
@@ -202,6 +227,11 @@ def build_speech_events(
         transcription_result
     )
 
+    repeated_weakener_events = extract_repeated_weakener_events(
+        language_result
+    )
+    fillers.extend(repeated_weakener_events)
+
     repetitions = language_result.get(
         "repetition_restart_events",
         []
@@ -294,6 +324,17 @@ def build_speech_events(
             )
         ]
 
+        chunk_repeated_weakeners = [
+            event
+            for event in repeated_weakener_events
+            if overlaps(
+                event["start"],
+                event["end"],
+                chunk["start"],
+                chunk["end"]
+            )
+        ]
+
 
         signals = {
             "internal_pause":
@@ -304,6 +345,9 @@ def build_speech_events(
 
             "repetition_restart":
                 len(chunk_repetitions) > 0,
+
+            "repeated_weakener":
+                len(chunk_repeated_weakeners) > 0,
         }
 
 
@@ -337,6 +381,9 @@ def build_speech_events(
 
                 "repetition_restart":
                     chunk_repetitions,
+
+                "repeated_weakener":
+                    chunk_repeated_weakeners,
             }
         })
 
@@ -384,6 +431,17 @@ def build_speech_events(
             if overlaps(
                 repetition["start"],
                 repetition["end"],
+                transition_start,
+                transition_end
+            )
+        ]
+
+        transition_repeated_weakeners = [
+            event
+            for event in repeated_weakener_events
+            if overlaps(
+                event["start"],
+                event["end"],
                 transition_start,
                 transition_end
             )
@@ -458,6 +516,9 @@ def build_speech_events(
 
                 "repetition_restart":
                     len(transition_repetitions) > 0,
+
+                "repeated_weakener":
+                    len(transition_repeated_weakeners) > 0,
             },
 
             "details": {
@@ -469,6 +530,9 @@ def build_speech_events(
 
                 "repetition_restart":
                     transition_repetitions,
+
+                "repeated_weakener":
+                    transition_repeated_weakeners,
             }
         })
 
@@ -537,6 +601,11 @@ def score_event(event):
     if signals["repetition_restart"]:
         reasons.append(
             "반복 또는 재시작 발생"
+        )
+
+    if signals.get("repeated_weakener"):
+        reasons.append(
+            "한 문장 안에서 '약간' 반복 사용"
         )
 
 
