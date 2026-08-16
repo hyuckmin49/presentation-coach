@@ -4,6 +4,7 @@ import time
 
 import streamlit as st
 
+from analysis_time import analysis_time_label
 from audio_analysis import analyze_audio, detect_sustained_word_events
 from feedback_report import build_feedback_pdf, feedback_pdf_filename
 from language_analysis import analyze_language
@@ -386,7 +387,11 @@ def render_round_result(round_number, result, audio_bytes):
 
 
 def render_analysis_status(audio_file, transcriber):
-    with st.status("발표를 분석하고 있습니다...", expanded=True) as status:
+    estimate = analysis_time_label(audio_file.getvalue())
+    with st.status(
+        f"발표를 분석하고 있습니다... · {estimate}",
+        expanded=True,
+    ) as status:
         active_slot = None
         active_label = None
 
