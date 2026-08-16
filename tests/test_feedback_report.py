@@ -34,6 +34,11 @@ class FeedbackReportTests(unittest.TestCase):
             "홍길동",
             [sample_result(), sample_result(0), sample_result()],
             {(1, 1): "핵심 내용을 먼저 말하겠습니다."},
+            {
+                1: "문제 상황에서 분석 원리로 이어집니다.",
+                2: "분석 결과와 적용 방법을 연결합니다.",
+                3: "탐구의 한계와 개선 방향으로 마무리합니다.",
+            },
         )
 
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
@@ -44,6 +49,8 @@ class FeedbackReportTests(unittest.TestCase):
         self.assertIn("발표 코칭 최종 피드백", text)
         self.assertIn("홍길동", text)
         self.assertIn("3차 발표", text)
+        self.assertIn("발표 전체 구조 메모", text)
+        self.assertIn("탐구의 한계와 개선 방향", text)
         io_stream.close()
 
     def test_sanitizes_download_filename(self):
