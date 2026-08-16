@@ -131,12 +131,19 @@ def add_page_number(canvas, document):
     canvas.restoreState()
 
 
-def build_feedback_pdf(student_id, student_name, results, reflections):
+def build_feedback_pdf(
+    student_id,
+    student_name,
+    results,
+    reflections,
+    structure_notes=None,
+):
     """세 차례 발표 분석 결과를 하나의 한국어 PDF 바이트로 만든다."""
 
     if len(results) != 3:
         raise ValueError("PDF 생성에는 정확히 3회의 발표 결과가 필요합니다.")
 
+    structure_notes = structure_notes or {}
     font_name = register_korean_font()
     styles = build_styles(font_name)
     buffer = io.BytesIO()
@@ -263,8 +270,6 @@ def build_feedback_pdf(student_id, student_name, results, reflections):
                     styles["body"],
                 )
             )
-            continue
-
         for candidate_index, candidate in enumerate(candidates, start=1):
             story.append(
                 Paragraph(f"보완 후보 {candidate_index}", styles["subheading"])
@@ -297,12 +302,23 @@ def build_feedback_pdf(student_id, student_name, results, reflections):
             reflection = reflections.get((round_number, candidate_index), "").strip()
             story.append(
                 Paragraph(
-                    "사용자가 직접 정리한 내용: "
+                    "부분 구조 메모: "
                     + paragraph_text(reflection or "작성하지 않음"),
                     styles["body"],
                 )
             )
             story.append(Spacer(1, 2 * mm))
+
+        story.append(Paragraph("발표 전체 구조 메모", styles["subheading"]))
+        story.append(
+            Paragraph(
+                paragraph_text(
+                    structure_notes.get(round_number, "").strip()
+                    or "작성하지 않음"
+                ),
+                styles["body"],
+            )
+        )
 
     document.build(
         story,

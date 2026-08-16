@@ -34,6 +34,7 @@ def load_transcriber():
 
 def initialize_session_state():
     st.session_state.setdefault("current_step", 1)
+    st.session_state.setdefault("onboarding_step", 1)
     st.session_state.setdefault("student_info_confirmed", False)
 
 
@@ -49,17 +50,29 @@ def reflection_key(round_number, candidate_index):
     return f"round_{round_number}_reflection_{candidate_index}"
 
 
-def run_analysis(audio_file, transcriber):
+def structure_note_key(round_number):
+    return f"round_{round_number}_structure_note"
+
+
+def run_analysis(audio_file, transcriber, on_stage=None):
     """Streamlit 입력 음성에 A → B → C → D 분석을 수행한다."""
+
+    def announce(label):
+        if on_stage is not None:
+            on_stage(label)
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
         tmp.write(audio_file.getvalue())
         audio_path = tmp.name
 
     try:
+        announce("A. 음성 신호 분석")
         audio_result = analyze_audio(audio_path)
+        announce("B. 음성을 텍스트로 변환")
         transcription_result = transcriber.transcribe(audio_path)
+        announce("C. 발화 구조 분석")
         language_result = analyze_language(transcription_result)
+        announce("D. 비유창성 후보 통합 판단")
         scoring_result = analyze_scoring(
             audio_result,
             transcription_result,
@@ -95,6 +108,7 @@ def clear_from_round(round_number):
     for target_round in range(round_number, TOTAL_ROUNDS + 1):
         st.session_state.pop(result_key(target_round), None)
         st.session_state.pop(audio_key(target_round), None)
+        st.session_state.pop(structure_note_key(target_round), None)
         prefix = f"round_{target_round}_reflection_"
         for key in list(st.session_state):
             if key.startswith(prefix):
@@ -115,11 +129,73 @@ def reset_practice():
     ):
         st.session_state.pop(key, None)
     st.session_state.student_info_confirmed = False
+    st.session_state.onboarding_step = 1
     st.session_state.current_step = 1
 
 
 def go_to_step(step):
     st.session_state.current_step = step
+
+
+def render_program_introduction():
+    st.header("발표를 외우는 대신 구조화하는 연습")
+    st.write(
+        "이 프로그램은 발표의 정답이나 내용 수준을 평가하지 않습니다. "
+        "멈춤, 간투사, 반복·재시작처럼 발화 흐름이 흔들린 구간을 찾아 "
+        "발표자가 다시 생각해 볼 지점을 제안합니다."
+    )
+    with st.container(border=True):
+        st.subheader("어디를 코칭하나요?")
+        st.write("발표 중 의미 단위 내부에서 머뭇거리거나 흐름이 끊긴 구간을 살펴봅니다.")
+        st.caption(
+            "탐지 결과는 잘못된 구간에 대한 판정이 아니라, "
+            "스스로 점검할 보완 후보입니다."
+        )
+    st.info(
+        "프로그램이 사람의 모든 문제점을 발견할 수는 없습니다. "
+        "발표 전문을 직접 읽고 스스로 점검하는 과정이 필요합니다."
+    )
+    with st.container(horizontal=True, horizontal_alignment="right"):
+        if st.button(
+            "사용 방법 보기",
+            type="primary",
+            icon=":material/arrow_forward:",
+        ):
+            st.session_state.onboarding_step = 2
+            st.rerun()
+
+
+def render_usage_guide():
+    st.header("세 번의 발표로 내용을 구조화합니다")
+    st.write(
+        "목표는 문장을 외워 매끄럽게 말하는 것이 아닙니다. "
+        "핵심 개념과 내용의 관계를 머릿속에 구조화한 뒤, "
+        "같은 내용을 자신의 언어로 다시 발표하는 것입니다."
+    )
+    for title, description in (
+        ("1. 발표하고 확인하기", "음성을 분석해 보완 후보와 발표 전문을 확인합니다."),
+        ("2. 부분부터 점검하기", "각 보완 후보에서 전달하려던 내용의 관계를 정리합니다."),
+        ("3. 전체로 확장하기", "부분 점검을 바탕으로 발표 전체의 구조를 다시 메모합니다."),
+        ("4. 다시 발표하기", "구조를 떠올리며 자신의 언어로 총 3차례 발표합니다."),
+    ):
+        with st.container(border=True):
+            st.markdown(f"**{title}**")
+            st.write(description)
+    st.warning(
+        "머릿속에 내용을 구조화해 보는 적극적인 시도가 필요합니다. "
+        "부분 구조 메모와 전체 구조 메모를 작성해야 다음 회차로 넘어갈 수 있습니다."
+    )
+    with st.container(horizontal=True, horizontal_alignment="distribute"):
+        if st.button("이전", icon=":material/arrow_back:"):
+            st.session_state.onboarding_step = 1
+            st.rerun()
+        if st.button(
+            "시작해 보기",
+            type="primary",
+            icon=":material/play_arrow:",
+        ):
+            st.session_state.onboarding_step = 3
+            st.rerun()
 
 
 def render_student_entry():
@@ -208,11 +284,34 @@ def render_candidate(
         )
 
         st.text_area(
-            "이 구간에서 전달하려던 핵심 내용과 내용 간 관계를 "
-            "간단히 정리해 보세요.",
+            "부분 구조 메모 (필수)",
             key=reflection_key(round_number, candidate_index),
             placeholder="예: 현재 작업 → 알고리즘 제작 → 학습 데이터 구축",
+            help=(
+                "이 구간에서 전달하려던 핵심 내용과 "
+                "내용 간 관계를 간단히 정리하세요."
+            ),
+            persist_state="session",
         )
+
+
+def render_structure_note(round_number):
+    st.divider()
+    st.subheader("발표 전체 구조 메모")
+    st.write(
+        "부분 점검을 바탕으로 발표 전체에서 전달하려는 핵심 개념과 "
+        "내용의 관계를 다시 구조화해 보세요."
+    )
+    st.text_area(
+        "전체 구조 메모 (필수)",
+        key=structure_note_key(round_number),
+        placeholder=(
+            "예: 문제 상황 → 기존 방식의 한계 → 분석 원리 "
+            "→ 적용 결과 → 탐구의 한계"
+        ),
+        height=150,
+        persist_state="session",
+    )
 
 
 def render_round_result(round_number, result, audio_bytes):
@@ -232,25 +331,39 @@ def render_round_result(round_number, result, audio_bytes):
 
     if not candidates:
         st.success("우선 코칭이 필요한 비유창성 후보 구간이 탐지되지 않았습니다.")
-        return
-
-    st.warning(f"우선 점검할 발화 구간이 {len(candidates)}개 탐지되었습니다.")
-    for index, candidate in enumerate(candidates, start=1):
-        render_candidate(
-            candidate,
-            index,
-            round_number,
-            audio_bytes,
+        st.caption(
+            "자동 탐지 결과가 없더라도 발표 전문을 직접 점검한 뒤 "
+            "전체 구조 메모를 작성하세요."
         )
+    else:
+        st.warning(f"우선 점검할 발화 구간이 {len(candidates)}개 탐지되었습니다.")
+        for index, candidate in enumerate(candidates, start=1):
+            render_candidate(
+                candidate,
+                index,
+                round_number,
+                audio_bytes,
+            )
+
+    render_structure_note(round_number)
 
 
 def render_analysis_status(audio_file, transcriber):
     with st.status("발표를 분석하고 있습니다...", expanded=True) as status:
-        st.write("A. 음성 신호 분석")
-        st.write("B. 음성을 텍스트로 변환")
-        st.write("C. 발화 구조 분석")
-        st.write("D. 비유창성 후보 통합 판단")
-        result = run_analysis(audio_file, transcriber)
+        active_slot = None
+        active_label = None
+
+        def show_stage(label):
+            nonlocal active_slot, active_label
+            if active_slot is not None:
+                active_slot.write(f"✓ {active_label}")
+            active_slot = st.empty()
+            active_label = label
+            active_slot.write(f"진행 중 · {label}")
+
+        result = run_analysis(audio_file, transcriber, on_stage=show_stage)
+        if active_slot is not None:
+            active_slot.write(f"✓ {active_label}")
         status.update(
             label="발표 분석 완료",
             state="complete",
@@ -282,7 +395,17 @@ def render_audio_input(round_number):
     )
 
 
-def render_round_navigation(round_number, has_result):
+def missing_required_notes(round_number, result):
+    missing = []
+    for index, _candidate in enumerate(get_candidates(result), start=1):
+        if not st.session_state.get(reflection_key(round_number, index), "").strip():
+            missing.append(f"보완 후보 {index}의 부분 구조 메모")
+    if not st.session_state.get(structure_note_key(round_number), "").strip():
+        missing.append("발표 전체 구조 메모")
+    return missing
+
+
+def render_round_navigation(round_number, result):
     st.divider()
     with st.container(horizontal=True, horizontal_alignment="distribute"):
         if round_number > 1 and st.button(
@@ -293,7 +416,7 @@ def render_round_navigation(round_number, has_result):
             go_to_step(round_number - 1)
             st.rerun()
 
-        if has_result:
+        if result is not None:
             next_label = (
                 "최종 비교 보기"
                 if round_number == TOTAL_ROUNDS
@@ -305,8 +428,12 @@ def render_round_navigation(round_number, has_result):
                 icon=":material/arrow_forward:",
                 key=f"round_{round_number}_next",
             ):
-                go_to_step(round_number + 1)
-                st.rerun()
+                missing = missing_required_notes(round_number, result)
+                if missing:
+                    st.error("다음 항목을 작성해야 계속할 수 있습니다: " + ", ".join(missing))
+                else:
+                    go_to_step(round_number + 1)
+                    st.rerun()
 
 
 def render_round_page(round_number, transcriber):
@@ -353,7 +480,7 @@ def render_round_page(round_number, transcriber):
                 clear_from_round(round_number)
                 st.rerun()
 
-    render_round_navigation(round_number, stored_result is not None)
+    render_round_navigation(round_number, stored_result)
 
 
 def render_comparison_candidate(round_number, candidate, index, audio_bytes):
@@ -444,18 +571,24 @@ def render_comparison_page():
                 )
 
     reflections = {}
+    structure_notes = {}
     for round_number, result in enumerate(results, start=1):
         for index, _candidate in enumerate(get_candidates(result), start=1):
             reflections[(round_number, index)] = st.session_state.get(
                 reflection_key(round_number, index),
                 "",
             )
+        structure_notes[round_number] = st.session_state.get(
+            structure_note_key(round_number),
+            "",
+        )
 
     pdf_bytes = build_feedback_pdf(
         st.session_state.student_id,
         st.session_state.student_name,
         results,
         reflections,
+        structure_notes,
     )
     st.subheader("최종 피드백 문서")
     st.write(
@@ -496,6 +629,14 @@ st.write(
     "발표 음성을 분석하여 발화 흐름이 흔들린 구간을 찾고, "
     "세 번의 연습 결과를 비교합니다."
 )
+
+if st.session_state.onboarding_step == 1:
+    render_program_introduction()
+    st.stop()
+
+if st.session_state.onboarding_step == 2:
+    render_usage_guide()
+    st.stop()
 
 if not st.session_state.student_info_confirmed:
     render_student_entry()
