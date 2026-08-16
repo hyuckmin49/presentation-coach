@@ -329,12 +329,6 @@ def analyze_audio(audio_path: str):
         duration
     )
 
-    acoustic_segments = analyze_voiced_segments(
-        y,
-        sr,
-        speech_intervals
-    )
-
     result = {
         "audio_path": audio_path,
         "sample_rate": sr,
@@ -344,7 +338,10 @@ def analyze_audio(audio_path: str):
 
         "pauses": pauses,
 
-        "acoustic_segments": acoustic_segments
+        # 기존 구간별 pYIN 계산은 아직 최종 판정에 사용되지 않으면서
+        # 분석 시간을 늘렸으므로 보류한다. 음 끌기 탐지 단계에서
+        # 전체 파형을 한 번만 처리하는 방식으로 다시 연결할 예정이다.
+        "acoustic_segments": []
     }
 
     return result

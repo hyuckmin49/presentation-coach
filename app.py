@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 
 import streamlit as st
 
@@ -66,23 +67,37 @@ def run_analysis(audio_file, transcriber, on_stage=None):
         audio_path = tmp.name
 
     try:
+        processing_seconds = {}
+
         announce("A. 음성 신호 분석")
+        started_at = time.perf_counter()
         audio_result = analyze_audio(audio_path)
+        processing_seconds["A"] = round(time.perf_counter() - started_at, 3)
+
         announce("B. 음성을 텍스트로 변환")
+        started_at = time.perf_counter()
         transcription_result = transcriber.transcribe(audio_path)
+        processing_seconds["B"] = round(time.perf_counter() - started_at, 3)
+
         announce("C. 발화 구조 분석")
+        started_at = time.perf_counter()
         language_result = analyze_language(transcription_result)
+        processing_seconds["C"] = round(time.perf_counter() - started_at, 3)
+
         announce("D. 비유창성 후보 통합 판단")
+        started_at = time.perf_counter()
         scoring_result = analyze_scoring(
             audio_result,
             transcription_result,
             language_result,
         )
+        processing_seconds["D"] = round(time.perf_counter() - started_at, 3)
         return {
             "audio_result": audio_result,
             "transcription_result": transcription_result,
             "language_result": language_result,
             "scoring_result": scoring_result,
+            "processing_seconds": processing_seconds,
         }
     finally:
         if os.path.exists(audio_path):
