@@ -4,9 +4,11 @@ import tempfile
 import streamlit as st
 
 from audio_analysis import analyze_audio
+from feedback_report import build_feedback_pdf, feedback_pdf_filename
 from language_analysis import analyze_language
 from scoring import analyze_scoring
 from transcription import WhisperTranscriber
+from transcript_highlight import highlight_transcript
 
 
 TOTAL_ROUNDS = 3
@@ -32,6 +34,7 @@ def load_transcriber():
 
 def initialize_session_state():
     st.session_state.setdefault("current_step", 1)
+    st.session_state.setdefault("student_info_confirmed", False)
 
 
 def result_key(round_number):
@@ -104,11 +107,56 @@ def reset_practice():
     for key in list(st.session_state):
         if key.startswith("round_"):
             del st.session_state[key]
+    for key in (
+        "student_id",
+        "student_name",
+        "student_id_input",
+        "student_name_input",
+    ):
+        st.session_state.pop(key, None)
+    st.session_state.student_info_confirmed = False
     st.session_state.current_step = 1
 
 
 def go_to_step(step):
     st.session_state.current_step = step
+
+
+def render_student_entry():
+    st.header("연습 정보")
+    st.write(
+        "최종 피드백 PDF의 파일명과 표지에 사용할 학번과 이름을 입력하세요. "
+        "입력한 정보는 현재 브라우저 세션에서만 사용됩니다."
+    )
+    with st.form("student_info_form"):
+        st.text_input(
+            "학번",
+            key="student_id_input",
+            max_chars=30,
+            placeholder="예: 20315",
+        )
+        st.text_input(
+            "이름",
+            key="student_name_input",
+            max_chars=30,
+            placeholder="예: 홍길동",
+        )
+        submitted = st.form_submit_button(
+            "연습 시작",
+            type="primary",
+            icon=":material/play_arrow:",
+        )
+
+    if submitted:
+        student_id = st.session_state.student_id_input.strip()
+        student_name = st.session_state.student_name_input.strip()
+        if not student_id or not student_name:
+            st.error("학번과 이름을 모두 입력하세요.")
+            return
+        st.session_state.student_id = student_id
+        st.session_state.student_name = student_name
+        st.session_state.student_info_confirmed = True
+        st.rerun()
 
 
 def render_progress():
@@ -172,8 +220,15 @@ def render_round_result(round_number, result, audio_bytes):
     st.divider()
     st.header(f"{round_number}차 발표 분석 결과")
 
-    with st.expander("전체 발표 내용 보기"):
-        st.write(result["transcription_result"]["text"])
+    with st.expander("발표 전문 보기", expanded=True):
+        st.caption("노란색 부분은 보완 후보로 탐지된 발화입니다.")
+        st.markdown(
+            highlight_transcript(
+                result["transcription_result"]["text"],
+                candidates,
+            ),
+            unsafe_allow_html=True,
+        )
 
     if not candidates:
         st.success("우선 코칭이 필요한 비유창성 후보 구간이 탐지되지 않았습니다.")
@@ -369,8 +424,15 @@ def render_comparison_page():
         with st.expander(
             f"{round_number}차 세부 결과 · 보완 후보 {len(candidates)}개"
         ):
-            st.markdown("**전체 발표 내용**")
-            st.write(result["transcription_result"]["text"])
+            st.markdown("**발표 전문**")
+            st.caption("노란색 부분은 보완 후보로 탐지된 발화입니다.")
+            st.markdown(
+                highlight_transcript(
+                    result["transcription_result"]["text"],
+                    candidates,
+                ),
+                unsafe_allow_html=True,
+            )
             if not candidates:
                 st.success("보완 후보가 탐지되지 않았습니다.")
             for index, candidate in enumerate(candidates, start=1):
@@ -380,6 +442,38 @@ def render_comparison_page():
                     index,
                     st.session_state[audio_key(round_number)],
                 )
+
+    reflections = {}
+    for round_number, result in enumerate(results, start=1):
+        for index, _candidate in enumerate(get_candidates(result), start=1):
+            reflections[(round_number, index)] = st.session_state.get(
+                reflection_key(round_number, index),
+                "",
+            )
+
+    pdf_bytes = build_feedback_pdf(
+        st.session_state.student_id,
+        st.session_state.student_name,
+        results,
+        reflections,
+    )
+    st.subheader("최종 피드백 문서")
+    st.write(
+        "세 차례 발표 결과와 작성한 회고가 포함된 PDF를 개인 기기에 저장하세요."
+    )
+    st.download_button(
+        "최종 피드백 PDF 다운로드",
+        data=pdf_bytes,
+        file_name=feedback_pdf_filename(
+            st.session_state.student_id,
+            st.session_state.student_name,
+        ),
+        mime="application/pdf",
+        type="primary",
+        icon=":material/download:",
+        on_click="ignore",
+        width="stretch",
+    )
 
     st.divider()
     with st.container(horizontal=True, horizontal_alignment="distribute"):
@@ -396,13 +490,21 @@ def render_comparison_page():
 
 
 initialize_session_state()
-transcriber = load_transcriber()
 
 st.title("🎤 발표 코칭 프로그램")
 st.write(
     "발표 음성을 분석하여 발화 흐름이 흔들린 구간을 찾고, "
     "세 번의 연습 결과를 비교합니다."
 )
+
+if not st.session_state.student_info_confirmed:
+    render_student_entry()
+    st.stop()
+
+st.caption(
+    f"{st.session_state.student_id} · {st.session_state.student_name}"
+)
+transcriber = load_transcriber()
 render_progress()
 st.divider()
 
