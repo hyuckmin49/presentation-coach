@@ -237,6 +237,11 @@ def build_speech_events(
         []
     )
 
+    sustained_word_events = audio_result.get(
+        "sustained_word_events",
+        []
+    )
+
     chunks = flatten_chunks(language_result)
 
     events = []
@@ -335,6 +340,17 @@ def build_speech_events(
             )
         ]
 
+        chunk_sustained_words = [
+            event
+            for event in sustained_word_events
+            if overlaps(
+                event["start"],
+                event["end"],
+                chunk["start"],
+                chunk["end"]
+            )
+        ]
+
 
         signals = {
             "internal_pause":
@@ -348,6 +364,9 @@ def build_speech_events(
 
             "repeated_weakener":
                 len(chunk_repeated_weakeners) > 0,
+
+            "sustained_vowel":
+                len(chunk_sustained_words) > 0,
         }
 
 
@@ -384,6 +403,9 @@ def build_speech_events(
 
                 "repeated_weakener":
                     chunk_repeated_weakeners,
+
+                "sustained_vowel":
+                    chunk_sustained_words,
             }
         })
 
@@ -447,6 +469,17 @@ def build_speech_events(
             )
         ]
 
+        transition_sustained_words = [
+            event
+            for event in sustained_word_events
+            if overlaps(
+                event["start"],
+                event["end"],
+                transition_start,
+                transition_end
+            )
+        ]
+
 
         # pause는 boundary에서 단독 점수 없음
         boundary_pauses = []
@@ -473,6 +506,7 @@ def build_speech_events(
         if (
             len(transition_fillers) == 0
             and len(transition_repetitions) == 0
+            and len(transition_sustained_words) == 0
         ):
             continue
 
@@ -519,6 +553,9 @@ def build_speech_events(
 
                 "repeated_weakener":
                     len(transition_repeated_weakeners) > 0,
+
+                "sustained_vowel":
+                    len(transition_sustained_words) > 0,
             },
 
             "details": {
@@ -533,6 +570,9 @@ def build_speech_events(
 
                 "repeated_weakener":
                     transition_repeated_weakeners,
+
+                "sustained_vowel":
+                    transition_sustained_words,
             }
         })
 
@@ -575,6 +615,10 @@ def score_event(event):
     else:
         score = 5
 
+    # 음 끌기는 단독으로도 사용자가 다시 점검할 강한 음향 신호다.
+    if signals.get("sustained_vowel"):
+        score = max(score, 3)
+
 
     if score == 0:
         classification = "GENERAL"
@@ -606,6 +650,11 @@ def score_event(event):
     if signals.get("repeated_weakener"):
         reasons.append(
             "한 문장 안에서 '약간' 반복 사용"
+        )
+
+    if signals.get("sustained_vowel"):
+        reasons.append(
+            "음을 길게 끄는 발화 후보"
         )
 
 

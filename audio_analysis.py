@@ -14,6 +14,18 @@ from config import (
     F0_STD_THRESHOLD,
     F0_SLOPE_THRESHOLD,
     FLATNESS_THRESHOLD,
+    MIN_SUSTAINED_DURATION,
+    MAX_SUSTAINED_DURATION,
+    MIN_DURATION_PER_SYLLABLE,
+    MIN_WINDOWED_DURATION_PER_SYLLABLE,
+    SUSTAINED_WINDOW_STEP,
+    MIN_SUSTAINED_VOICED_RATIO,
+    MAX_SUSTAINED_F0_STD_SEMITONE,
+    MAX_SUSTAINED_FLATNESS,
+    MIN_SUSTAINED_RMS,
+    MIN_WINDOWED_SUSTAINED_VOICED_RATIO,
+    MAX_WINDOWED_SUSTAINED_F0_STD_SEMITONE,
+    MAX_WINDOWED_SUSTAINED_FLATNESS,
 )
 
 
@@ -205,6 +217,145 @@ def analyze_rms(segment):
     )
 
     return round(float(np.mean(rms)), 6)
+
+
+def count_korean_syllables(text):
+    return sum(1 for character in text if "가" <= character <= "힣")
+
+
+def analyze_sustained_segment(segment, sr):
+    if len(segment) < FRAME_LENGTH:
+        return None
+
+    try:
+        f0, voiced_flag, _voiced_prob = librosa.pyin(
+            segment,
+            fmin=F0_MIN,
+            fmax=F0_MAX,
+            sr=sr,
+            frame_length=FRAME_LENGTH,
+            hop_length=HOP_LENGTH,
+        )
+    except Exception:
+        return None
+
+    valid_f0 = f0[~np.isnan(f0)]
+    if len(valid_f0) < 2:
+        return None
+
+    median_f0 = np.median(valid_f0)
+    semitone_offsets = 12 * np.log2(valid_f0 / median_f0)
+    return {
+        "voiced_ratio": float(np.mean(voiced_flag)),
+        "f0_std_semitone": float(np.std(semitone_offsets)),
+        "spectral_flatness": analyze_spectral_flatness(segment),
+        "rms_mean": analyze_rms(segment),
+    }
+
+
+def is_sustained_features(features, *, windowed=False):
+    if features is None:
+        return False
+
+    if windowed:
+        min_voiced_ratio = MIN_WINDOWED_SUSTAINED_VOICED_RATIO
+        max_f0_std = MAX_WINDOWED_SUSTAINED_F0_STD_SEMITONE
+        max_flatness = MAX_WINDOWED_SUSTAINED_FLATNESS
+    else:
+        min_voiced_ratio = MIN_SUSTAINED_VOICED_RATIO
+        max_f0_std = MAX_SUSTAINED_F0_STD_SEMITONE
+        max_flatness = MAX_SUSTAINED_FLATNESS
+
+    return (
+        features["voiced_ratio"] >= min_voiced_ratio
+        and features["f0_std_semitone"] <= max_f0_std
+        and features["spectral_flatness"] is not None
+        and features["spectral_flatness"] <= max_flatness
+        and features["rms_mean"] is not None
+        and features["rms_mean"] >= MIN_SUSTAINED_RMS
+    )
+
+
+def detect_sustained_word_events_from_waveform(y, sr, transcription_result):
+    """Whisper 단어 전체와 여러 음절 단어 내부의 지속 유성음을 찾는다."""
+
+    events = []
+    for word_info in transcription_result.get("words", []):
+        text = word_info.get("word", "").strip(".,?! ")
+        syllable_count = count_korean_syllables(text)
+        if syllable_count == 0:
+            continue
+
+        start = float(word_info["start"])
+        end = float(word_info["end"])
+        duration = end - start
+        duration_per_syllable = duration / syllable_count
+        if not MIN_SUSTAINED_DURATION <= duration <= MAX_SUSTAINED_DURATION:
+            continue
+
+        event_start = start
+        event_end = end
+        features = None
+        detection_method = "whole_word"
+
+        if syllable_count == 1 and duration_per_syllable >= MIN_DURATION_PER_SYLLABLE:
+            segment = y[int(start * sr):int(end * sr)]
+            features = analyze_sustained_segment(segment, sr)
+            detected = is_sustained_features(features)
+        elif duration_per_syllable >= MIN_WINDOWED_DURATION_PER_SYLLABLE:
+            detected = False
+            detection_method = "word_internal_window"
+            latest_window_start = end - MIN_SUSTAINED_DURATION
+            for window_start in np.arange(
+                start,
+                latest_window_start + 0.001,
+                SUSTAINED_WINDOW_STEP,
+            ):
+                window_end = window_start + MIN_SUSTAINED_DURATION
+                segment = y[int(window_start * sr):int(window_end * sr)]
+                window_features = analyze_sustained_segment(segment, sr)
+                if is_sustained_features(window_features, windowed=True):
+                    event_start = float(window_start)
+                    event_end = float(window_end)
+                    features = window_features
+                    detected = True
+                    break
+        else:
+            detected = False
+
+        if detected:
+            # Whisper가 한 지속음을 맞닿은 두 단어에 걸쳐 배정할 수 있다.
+            # 이미 잡힌 구간과 바로 이어지는 내부 창은 중복 후보로 추가하지 않는다.
+            if (
+                detection_method == "word_internal_window"
+                and events
+                and event_start <= events[-1]["end"] + SUSTAINED_WINDOW_STEP
+            ):
+                continue
+
+            events.append({
+                "start": round(event_start, 3),
+                "end": round(event_end, 3),
+                "duration": round(event_end - event_start, 3),
+                "duration_per_syllable": round(duration_per_syllable, 3),
+                "text": text,
+                "detection_method": detection_method,
+                "voiced_ratio": round(features["voiced_ratio"], 3),
+                "f0_std_semitone": round(features["f0_std_semitone"], 3),
+                "spectral_flatness": features["spectral_flatness"],
+                "rms_mean": features["rms_mean"],
+            })
+
+    return events
+
+
+def detect_sustained_word_events(audio_path, transcription_result):
+    y, sr, _duration = load_audio(audio_path)
+    return detect_sustained_word_events_from_waveform(
+        y,
+        sr,
+        transcription_result,
+    )
 
 
 def classify_filler_candidate(
