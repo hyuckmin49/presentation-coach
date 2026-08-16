@@ -4,7 +4,7 @@ import time
 
 import streamlit as st
 
-from audio_analysis import analyze_audio
+from audio_analysis import analyze_audio, detect_sustained_word_events
 from feedback_report import build_feedback_pdf, feedback_pdf_filename
 from language_analysis import analyze_language
 from scoring import analyze_scoring
@@ -77,6 +77,10 @@ def run_analysis(audio_file, transcriber, on_stage=None):
         announce("B. 음성을 텍스트로 변환")
         started_at = time.perf_counter()
         transcription_result = transcriber.transcribe(audio_path)
+        audio_result["sustained_word_events"] = detect_sustained_word_events(
+            audio_path,
+            transcription_result,
+        )
         processing_seconds["B"] = round(time.perf_counter() - started_at, 3)
 
         announce("C. 발화 구조 분석")
@@ -115,6 +119,22 @@ def get_candidate_text(candidate):
         f"{candidate.get('left_text', '')} "
         f"→ {candidate.get('right_text', '')}"
     ).strip()
+
+
+def get_sustained_word_events(candidate):
+    return candidate.get("details", {}).get("sustained_vowel", [])
+
+
+def render_sustained_word_details(candidate):
+    events = get_sustained_word_events(candidate)
+    if not events:
+        return
+    st.markdown("**음 끌기 세부 구간**")
+    for event in events:
+        st.write(
+            f"{event['start']:.2f}s ~ {event['end']:.2f}s · "
+            f"전사 단어: `{event['text']}`"
+        )
 
 
 def clear_from_round(round_number):
@@ -286,6 +306,8 @@ def render_candidate(
         st.markdown("**탐지 근거**")
         for reason in candidate["reasons"]:
             st.write(f"- {reason}")
+
+        render_sustained_word_details(candidate)
 
         if candidate.get("coaching_prompt"):
             st.markdown("**코칭 제안**")
@@ -507,6 +529,7 @@ def render_comparison_candidate(round_number, candidate, index, audio_bytes):
         )
         st.info(get_candidate_text(candidate))
         st.write("탐지 근거: " + ", ".join(candidate["reasons"]))
+        render_sustained_word_details(candidate)
         st.audio(
             audio_bytes,
             format="audio/wav",

@@ -292,6 +292,15 @@ def build_feedback_pdf(
             story.append(
                 Paragraph(f"탐지 근거: {paragraph_text(reasons)}", styles["body"])
             )
+            for event in candidate.get("details", {}).get("sustained_vowel", []):
+                story.append(
+                    Paragraph(
+                        "음 끌기 세부 구간: "
+                        f"{event['start']:.2f}s - {event['end']:.2f}s "
+                        f"/ 전사 단어: {paragraph_text(event['text'])}",
+                        styles["body"],
+                    )
+                )
             if candidate.get("coaching_prompt"):
                 story.append(
                     Paragraph(
